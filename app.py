@@ -386,8 +386,15 @@ USER QUESTION: {q}
             if not answer:
                 return "I cannot verify that from the current Degree OS data.", "Safety fallback"
             return answer, "Gemini · grounded in loaded Degree OS data"
-        except Exception:
-            return "I cannot verify that from the current Degree OS data.", "Gemini unavailable; safe fallback"
+        except Exception as exc:
+            # Show a useful diagnostic without exposing the API key.
+            error_message = str(exc).replace(api_key, "[API KEY HIDDEN]") if api_key else str(exc)
+            error_message = error_message[:500]
+            return (
+                "I cannot verify that from the current Degree OS data. "
+                "Gemini request failed; check the diagnostic shown below.",
+                f"Gemini error: {type(exc).__name__}: {error_message}"
+            )
 
     if question:
         st.session_state.chat_history.append({"role":"user","content":question})
