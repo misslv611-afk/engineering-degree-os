@@ -182,7 +182,8 @@ if page == "Dashboard":
 
 elif page == "Semesters 1-8":
     st.title("Semesters 1–8")
-    st.write("View credit requirements and progress across the complete degree.")
+    st.write("Review the sample credit allocation and academic progress across all eight semesters.")
+    st.caption("Credit figures are demonstration values, not verified university requirements.")
     cols = st.columns(2)
     for idx, row in sem.sort_values("semester").reset_index(drop=True).iterrows():
         with cols[idx % 2]:
@@ -205,7 +206,12 @@ elif page == "University Syllabus":
     st.title("University Syllabus")
     st.write("Programme-level syllabus reference. Enter only verified university details.")
     st.dataframe(tables["syllabus"], use_container_width=True, hide_index=True)
-    st.warning("The assignment brief does not specify a university, regulation year, official credit total or CGPA formula. These are intentionally not invented.")
+    st.info(
+    "**Academic data notice:** This prototype currently uses sample "
+    "academic information. University-specific regulations, credit "
+    "requirements and CGPA calculations will be added once verified "
+    "against the official university syllabus and regulations."
+)
     st.markdown("**Official source/reference:** Add the university syllabus URL, regulation document title, academic year and page/section in Data Admin.")
 
 elif page == "Academic / Leave Calendar":
