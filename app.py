@@ -1,955 +1,396 @@
-"""
-Engineering Degree OS
-An academic planning, tracking, and AI guidance platform for engineering students.
-Built with Streamlit, Pandas, and the Google GenAI SDK.
-"""
+from __future__ import annotations
 
-import os
-import time
-import datetime
 from pathlib import Path
-from typing import Dict, Tuple, Optional
-
+from datetime import date
+import os
+import re
 import pandas as pd
 import streamlit as st
 
-# Attempt official Google GenAI SDK import
-try:
-    from google import genai
-    from google.genai import types
-    from google.genai.errors import APIError
-    GENAI_AVAILABLE = True
-except ImportError:
-    GENAI_AVAILABLE = False
+APP_DIR = Path(__file__).parent
+DATA_DIR = APP_DIR / "data"
+st.set_page_config(page_title="Engineering Degree OS", page_icon="🎓", layout="wide")
 
-
-# ==========================================
-# 1. APPLICATION CONFIGURATION & STYLES
-# ==========================================
-
-st.set_page_config(
-    page_title="Engineering Degree OS",
-    page_icon="🎓",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-# Custom SaaS styling: Clean slate, navy, teal accents, rounded cards
-st.markdown(
-    """
-    <style>
-    /* Global styles */
-    .block-container {
-        padding-top: 1.5rem;
-        padding-bottom: 3rem;
-    }
-    
-    /* Metrics and Cards */
-    .metric-card {
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 10px;
-        padding: 1.1rem;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-        margin-bottom: 0.8rem;
-    }
-    .metric-label {
-        font-size: 0.82rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: #64748b;
-    }
-    .metric-value {
-        font-size: 1.6rem;
-        font-weight: 700;
-        color: #0f172a;
-        margin-top: 0.2rem;
-    }
-    .metric-sub {
-        font-size: 0.8rem;
-        color: #475569;
-        margin-top: 0.2rem;
-    }
-
-    /* Badges */
-    .badge {
-        display: inline-block;
-        padding: 0.25rem 0.6rem;
-        border-radius: 9999px;
-        font-size: 0.75rem;
-        font-weight: 600;
-    }
-    .badge-completed { background-color: #dcfce7; color: #166534; }
-    .badge-progress { background-color: #e0f2fe; color: #075985; }
-    .badge-pending { background-color: #f1f5f9; color: #475569; }
-    .badge-urgent { background-color: #fee2e2; color: #991b1b; }
-    .badge-warning { background-color: #fef3c7; color: #92400e; }
-
-    /* Clean Card Layout */
-    .os-card {
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 10px;
-        padding: 1.25rem;
-        margin-bottom: 1rem;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.03);
-    }
-    .os-card-header {
-        font-size: 1.05rem;
-        font-weight: 700;
-        color: #0f172a;
-        margin-bottom: 0.5rem;
-    }
-
-    /* Source tag */
-    .source-tag {
-        font-size: 0.75rem;
-        padding: 2px 8px;
-        border-radius: 4px;
-        font-weight: 600;
-        display: inline-block;
-        margin-bottom: 6px;
-    }
-    .source-gemini { background: #e0e7ff; color: #3730a3; border: 1px solid #c7d2fe; }
-    .source-local { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-
-# ==========================================
-# 2. DATA LAYER (CSV PERSISTENCE)
-# ==========================================
-
-DATA_DIR = Path("data")
-DATA_DIR.mkdir(exist_ok=True)
-
-# Default data initializers for fresh checkouts or deployments
-DEFAULT_DATA = {
-    "semesters.csv": pd.DataFrame([
-        {"semester_number": 1, "semester_name": "Semester 1", "status": "Completed", "completed_credits": 20, "total_credits": 20},
-        {"semester_number": 2, "semester_name": "Semester 2", "status": "Completed", "completed_credits": 21, "total_credits": 21},
-        {"semester_number": 3, "semester_name": "Semester 3", "status": "Completed", "completed_credits": 22, "total_credits": 22},
-        {"semester_number": 4, "semester_name": "Semester 4", "status": "In Progress", "completed_credits": 14, "total_credits": 22},
-        {"semester_number": 5, "semester_name": "Semester 5", "status": "Not Started", "completed_credits": 0, "total_credits": 21},
-        {"semester_number": 6, "semester_name": "Semester 6", "status": "Not Started", "completed_credits": 0, "total_credits": 20},
-        {"semester_number": 7, "semester_name": "Semester 7", "status": "Not Started", "completed_credits": 0, "total_credits": 18},
-        {"semester_number": 8, "semester_name": "Semester 8", "status": "Not Started", "completed_credits": 0, "total_credits": 16},
-    ]),
-    "courses.csv": pd.DataFrame([
-        {"course_code": "CS201", "course_name": "Data Structures & Algorithms", "semester": 3, "credits": 4, "status": "Completed", "syllabus_topics": "Arrays, Stacks, Queues, Linked Lists, Trees, Graphs, Sorting, Dynamic Programming"},
-        {"course_code": "CS202", "course_name": "Computer Organization & Architecture", "semester": 3, "credits": 4, "status": "Completed", "syllabus_topics": "Instruction Sets, ALU, Pipelining, Cache Memory, Multicores"},
-        {"course_code": "CS203", "course_name": "Discrete Mathematics", "semester": 3, "credits": 3, "status": "Completed", "syllabus_topics": "Set Theory, Logic, Relations, Graph Theory, Combinatorics"},
-        {"course_code": "CS301", "course_name": "Operating Systems", "semester": 4, "credits": 4, "status": "In Progress", "syllabus_topics": "Processes, Threads, CPU Scheduling, Deadlocks, Memory Management, File Systems"},
-        {"course_code": "CS302", "course_name": "Database Management Systems", "semester": 4, "credits": 4, "status": "In Progress", "syllabus_topics": "ER Model, Relational Algebra, SQL, Normalization, ACID, Indexing"},
-        {"course_code": "CS303", "course_name": "Design & Analysis of Algorithms", "semester": 4, "credits": 4, "status": "In Progress", "syllabus_topics": "Divide & Conquer, Greedy, DP, Backtracking, Branch & Bound, NP-Completeness"},
-        {"course_code": "CS304", "course_name": "Software Engineering", "semester": 4, "credits": 3, "status": "In Progress", "syllabus_topics": "SDLC, Agile, Requirement Analysis, Design Patterns, Testing"},
-        {"course_code": "CS305", "course_name": "Operating Systems Laboratory", "semester": 4, "credits": 2, "status": "Completed", "syllabus_topics": "Linux Shell Scripts, POSIX System Calls, Thread Synchronization"},
-        {"course_code": "CS401", "course_name": "Computer Networks", "semester": 5, "credits": 4, "status": "Not Started", "syllabus_topics": "OSI Reference, TCP/IP, Routing Algorithms, Flow Control, DNS, HTTP"},
-        {"course_code": "CS402", "course_name": "Theory of Computation", "semester": 5, "credits": 3, "status": "Not Started", "syllabus_topics": "Automata, Regular Expressions, Context-Free Grammars, Turing Machines"},
-    ]),
-    "academic_calendar.csv": pd.DataFrame([
-        {"date": "2026-03-25", "event_name": "Internal Assessment Test 1", "event_type": "Exam", "description": "Units 1 & 2 for all Sem 4 subjects"},
-        {"date": "2026-04-10", "event_name": "Mini-Project Mid-Review", "event_type": "Academic", "description": "Review of architecture and schema definition"},
-        {"date": "2026-04-14", "event_name": "Ambedkar Jayanti", "event_type": "Holiday", "description": "Sample holiday entry; verify with the official academic calendar"},
-        {"date": "2026-05-05", "event_name": "Internal Assessment Test 2", "event_type": "Exam", "description": "Units 3 & 4 evaluation"},
-        {"date": "2026-05-25", "event_name": "Semester Practical Examinations", "event_type": "Exam", "description": "Lab assessments by external examiners"},
-        {"date": "2026-06-08", "event_name": "End Semester University Theory Exams", "event_type": "Exam", "description": "Semester 4 final theoretical examination"},
-    ]),
-    "assessments.csv": pd.DataFrame([
-        {"assessment_id": "IA1-CS301", "course_code": "CS301", "assessment_type": "Internal Assessment 1", "date": "2026-03-25", "max_marks": 50, "status": "Upcoming"},
-        {"assessment_id": "IA1-CS302", "course_code": "CS302", "assessment_type": "Internal Assessment 1", "date": "2026-03-26", "max_marks": 50, "status": "Upcoming"},
-        {"assessment_id": "IA1-CS303", "course_code": "CS303", "assessment_type": "Internal Assessment 1", "date": "2026-03-27", "max_marks": 50, "status": "Upcoming"},
-        {"assessment_id": "PR-CS304", "course_code": "CS304", "assessment_type": "Agile Sprint Review 1", "date": "2026-04-02", "max_marks": 25, "status": "Upcoming"},
-        {"assessment_id": "LAB-CS305", "course_code": "CS305", "assessment_type": "Lab Quiz & Shell Evaluation", "date": "2026-03-10", "max_marks": 25, "status": "Completed"},
-    ]),
-    "scores.csv": pd.DataFrame([
-        {"course_code": "CS201", "assessment_name": "End Semester Examination", "marks_obtained": 88, "max_marks": 100, "semester": 3},
-        {"course_code": "CS202", "assessment_name": "End Semester Examination", "marks_obtained": 82, "max_marks": 100, "semester": 3},
-        {"course_code": "CS203", "assessment_name": "End Semester Examination", "marks_obtained": 91, "max_marks": 100, "semester": 3},
-        {"course_code": "CS305", "assessment_name": "Lab Quiz & Shell Evaluation", "marks_obtained": 23, "max_marks": 25, "semester": 4},
-    ]),
-    "plan_checklist.csv": pd.DataFrame([
-        {"task_id": "TSK-01", "category": "Academic Prep", "task_name": "Solve Process Scheduling Numerical Problems", "target_date": "2026-03-20", "status": "Pending", "notes": "FCFS, SJF, Round Robin with Gantt charts"},
-        {"task_id": "TSK-02", "category": "Assignment", "task_name": "Submit DBMS SQL Schema Design", "target_date": "2026-03-22", "status": "Pending", "notes": "Normalize database relations to 3NF/BCNF"},
-        {"task_id": "TSK-03", "category": "Project", "task_name": "Streamlit Prototype Setup for Degree OS", "target_date": "2026-03-15", "status": "Completed", "notes": "Setup repository structure and basic routing"},
-        {"task_id": "TSK-04", "category": "Self-Study", "task_name": "Review Dynamic Programming Knapsack Variations", "target_date": "2026-03-24", "status": "In Progress", "notes": "0/1 Knapsack, Unbounded Knapsack, Tabulation"},
-    ]),
-    "university_syllabus.csv": pd.DataFrame([
-        {"regulation": "Not entered", "branch": "Not verified", "source_url_or_ref": "Add official university syllabus URL or document reference", "status_type": "Needs Verification", "notes": "Do not treat this placeholder as an official regulation, credit requirement, or syllabus."}
-    ])
+# ---------- Data loading and compatibility ----------
+FILES = {
+    "semesters": "semesters.csv",
+    "courses": "courses.csv",
+    "calendar": "academic_calendar.csv",
+    "assessments": "assessments.csv",
+    "scores": "scores.csv",
+    "checklist": "plan_checklist.csv",
+    "university": "university_syllabus.csv",
 }
 
-def load_data(filename: str) -> pd.DataFrame:
-    """Load dataframe from CSV, initializing with defaults if missing."""
-    file_path = DATA_DIR / filename
-    if not file_path.exists():
-        # Fallback to current working directory if present
-        root_path = Path(filename)
-        if root_path.exists():
-            return pd.read_csv(root_path)
-        # Create from defaults
-        df = DEFAULT_DATA.get(filename, pd.DataFrame())
-        df.to_csv(file_path, index=False)
-        return df.copy()
-    try:
-        return pd.read_csv(file_path)
-    except Exception as e:
-        st.error(f"Error loading {filename}: {e}")
-        return DEFAULT_DATA.get(filename, pd.DataFrame()).copy()
+DEFAULTS = {
+    "semesters": pd.DataFrame([
+        {"semester": n, "status": "Not Started", "total_credits": 0, "completed_credits": 0}
+        for n in range(1, 9)
+    ]),
+    "courses": pd.DataFrame(columns=["semester", "course_code", "course_name", "credits", "syllabus", "status"]),
+    "calendar": pd.DataFrame(columns=["academic_year", "semester", "date", "event_type", "title"]),
+    "assessments": pd.DataFrame(columns=["semester", "course_code", "assessment_type", "date", "max_marks", "status"]),
+    "scores": pd.DataFrame(columns=["semester", "course_code", "assessment_type", "score", "max_marks", "grade"]),
+    "checklist": pd.DataFrame(columns=["category", "item", "target_date", "status", "notes"]),
+    "university": pd.DataFrame(columns=["section", "detail", "value", "source_reference"]),
+}
 
-def save_data(filename: str, df: pd.DataFrame) -> bool:
-    """Save dataframe to CSV in the data directory."""
-    try:
-        file_path = DATA_DIR / filename
-        df.to_csv(file_path, index=False)
-        return True
-    except Exception as e:
-        st.error(f"Error saving {filename}: {e}")
-        return False
+ALIASES = {
+    "semester": ["semester", "semester_number", "sem", "term"],
+    "status": ["status", "completion_status", "course_status"],
+    "total_credits": ["total_credits", "credits_total"],
+    "completed_credits": ["completed_credits", "earned_credits"],
+    "course_code": ["course_code", "code", "subject_code"],
+    "course_name": ["course_name", "name", "subject", "subject_name"],
+    "credits": ["credits", "credit", "credit_points"],
+    "syllabus": ["syllabus", "syllabus_topics", "topics", "units", "course_content"],
+    "date": ["date", "event_date", "assessment_date", "target_date"],
+    "event_type": ["event_type", "type", "category"],
+    "title": ["title", "event_name", "event", "name"],
+    "assessment_type": ["assessment_type", "type", "assessment"],
+    "max_marks": ["max_marks", "maximum_marks", "out_of", "total_marks"],
+    "score": ["score", "marks", "obtained_marks"],
+    "grade": ["grade", "letter_grade"],
+    "academic_year": ["academic_year", "year"],
+    "category": ["category", "task_category"],
+    "item": ["item", "task", "activity", "description"],
+    "target_date": ["target_date", "due_date", "date"],
+    "notes": ["notes", "remarks", "description"],
+    "section": ["section", "topic", "area"],
+    "detail": ["detail", "description"],
+    "value": ["value", "requirement"],
+    "source_reference": ["source_reference", "source", "reference", "url"],
+}
 
-def get_all_datasets() -> Dict[str, pd.DataFrame]:
-    """Retrieve all datasets in a dictionary."""
-    return {
-        "semesters": load_data("semesters.csv"),
-        "courses": load_data("courses.csv"),
-        "academic_calendar": load_data("academic_calendar.csv"),
-        "assessments": load_data("assessments.csv"),
-        "scores": load_data("scores.csv"),
-        "plan_checklist": load_data("plan_checklist.csv"),
-        "university_syllabus": load_data("university_syllabus.csv"),
-    }
+def clean_columns(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
+    return df
 
+def normalize(df: pd.DataFrame, dataset: str) -> pd.DataFrame:
+    df = clean_columns(df)
+    needed = {
+        "semesters": ["semester", "status", "total_credits", "completed_credits"],
+        "courses": ["semester", "course_code", "course_name", "credits", "syllabus", "status"],
+        "calendar": ["date", "event_type", "title", "semester", "academic_year"],
+        "assessments": ["semester", "course_code", "assessment_type", "date", "max_marks", "status"],
+        "scores": ["semester", "course_code", "assessment_type", "score", "max_marks", "grade"],
+        "checklist": ["category", "item", "target_date", "status", "notes"],
+        "university": ["section", "detail", "value", "source_reference"],
+    }[dataset]
+    for target in needed:
+        if target not in df.columns:
+            for alias in ALIASES.get(target, [target]):
+                if alias in df.columns:
+                    df[target] = df[alias]
+                    break
+        if target not in df.columns:
+            df[target] = ""
+    return df
 
-# ==========================================
-# 3. GEMINI AI GROUNDING & RETRY CLIENT
-# ==========================================
+@st.cache_data
+def read_csv_cached(path: str, modified: float):
+    return pd.read_csv(path)
 
-def get_gemini_client() -> Optional[object]:
-    """Instantiate Google GenAI client securely from Streamlit secrets."""
-    if not GENAI_AVAILABLE:
-        return None
-    api_key = st.secrets.get("GEMINI_API_KEY", "").strip()
-    if not api_key:
-        return None
-    try:
-        return genai.Client(api_key=api_key)
-    except Exception:
-        return None
-
-def build_grounded_academic_context(data_dict: Dict[str, pd.DataFrame]) -> str:
-    """Convert structured academic data into a compact context string."""
-    context_sections = []
-    
-    # 1. Semesters
-    sem_lines = []
-    for _, row in data_dict["semesters"].iterrows():
-        sem_lines.append(f"- Sem {row.get('semester_number')}: {row.get('status')} ({row.get('completed_credits')}/{row.get('total_credits')} credits)")
-    context_sections.append("SEMESTER RECORDS:\n" + "\n".join(sem_lines))
-    
-    # 2. Courses
-    crs_lines = []
-    for _, row in data_dict["courses"].iterrows():
-        crs_lines.append(f"- {row.get('course_code')} ({row.get('course_name')}) [Sem {row.get('semester')}]: {row.get('status')}, Credits: {row.get('credits')}. Topics: {row.get('syllabus_topics')}")
-    context_sections.append("COURSES & SYLLABUS TOPICS:\n" + "\n".join(crs_lines))
-    
-    # 3. Calendar
-    cal_lines = []
-    for _, row in data_dict["academic_calendar"].iterrows():
-        cal_lines.append(f"- {row.get('date')} [{row.get('event_type')}]: {row.get('event_name')} - {row.get('description')}")
-    context_sections.append("ACADEMIC & LEAVE CALENDAR:\n" + "\n".join(cal_lines))
-    
-    # 4. Assessments
-    asn_lines = []
-    for _, row in data_dict["assessments"].iterrows():
-        asn_lines.append(f"- {row.get('course_code')} | {row.get('assessment_type')} | Date: {row.get('date')} | Max: {row.get('max_marks')} | Status: {row.get('status')}")
-    context_sections.append("INTERNAL ASSESSMENTS:\n" + "\n".join(asn_lines))
-    
-    # 5. Scores
-    scr_lines = []
-    for _, row in data_dict["scores"].iterrows():
-        scr_lines.append(f"- {row.get('course_code')} ({row.get('assessment_name')}): {row.get('marks_obtained')}/{row.get('max_marks')} (Sem {row.get('semester')})")
-    context_sections.append("RECORDED ASSESSMENT SCORES (PROTOTYPE SAMPLE):\n" + "\n".join(scr_lines))
-    
-    # 6. Checklist
-    chk_lines = []
-    for _, row in data_dict["plan_checklist"].iterrows():
-        chk_lines.append(f"- [{row.get('status')}] {row.get('task_name')} ({row.get('category')}) Due: {row.get('target_date')}. Notes: {row.get('notes')}")
-    context_sections.append("TASKS & CHECKLIST:\n" + "\n".join(chk_lines))
-
-    # 7. University syllabus
-    syl_lines = []
-    for _, row in data_dict["university_syllabus"].iterrows():
-        syl_lines.append(f"- {row.get('regulation')} | {row.get('branch')} | Status: {row.get('status_type')} | Ref: {row.get('source_url_or_ref')}")
-    context_sections.append("UNIVERSITY REGULATION / SYLLABUS REFERENCE:\n" + "\n".join(syl_lines))
-
-    return "\n\n".join(context_sections)
-
-def generate_local_rule_based_response(query: str, data_dict: Dict[str, pd.DataFrame]) -> str:
-    """Deterministic, grounded local fallback when Gemini is unreachable."""
-    q = query.lower()
-    
-    if "incomplete" in q or "pending" in q:
-        if "sem" in q or "semester" in q:
-            # find semester number
-            for s in range(1, 9):
-                if str(s) in q:
-                    courses = data_dict["courses"]
-                    sem_crs = courses[(pd.to_numeric(courses["semester"], errors="coerce") == s) & (courses["status"].astype(str) != "Completed")]
-                    if not sem_crs.empty:
-                        items = [f"• **{r['course_code']}**: {r['course_name']} ({r['status']})" for _, r in sem_crs.iterrows()]
-                        return f"Incomplete courses in Semester {s} based on Degree OS records:\n\n" + "\n".join(items)
-                    return f"All courses recorded for Semester {s} are marked as Completed."
-        # Generic pending tasks
-        pending_tasks = data_dict["plan_checklist"][data_dict["plan_checklist"]["status"] != "Completed"]
-        if not pending_tasks.empty:
-            items = [f"• **{r['task_name']}** ({r['category']}) - Due: {r['target_date']}" for _, r in pending_tasks.iterrows()]
-            return "Here are your pending checklist tasks from Degree OS:\n\n" + "\n".join(items)
-
-    if "assessment" in q or "exam" in q or "test" in q:
-        upcoming_asn = data_dict["assessments"][data_dict["assessments"]["status"] == "Upcoming"]
-        if not upcoming_asn.empty:
-            first_asn = upcoming_asn.iloc[0]
-            crs = data_dict["courses"][data_dict["courses"]["course_code"] == first_asn["course_code"]]
-            syllabus = crs.iloc[0]["syllabus_topics"] if not crs.empty else "Refer to course syllabus"
-            return (
-                f"Your next scheduled assessment is **{first_asn['assessment_type']}** for **{first_asn['course_code']}** "
-                f"on **{first_asn['date']}** (Max marks: {first_asn['max_marks']}).\n\n"
-                f"**Relevant course topics to prepare:** {syllabus}"
-            )
-
-    if "progress" in q or "status" in q or "credits" in q:
-        completed_sem = data_dict["semesters"][data_dict["semesters"]["status"] == "Completed"]
-        curr_sem = data_dict["semesters"][data_dict["semesters"]["status"] == "In Progress"]
-        curr_num = curr_sem.iloc[0]["semester_number"] if not curr_sem.empty else "N/A"
-        tot_credits = data_dict["semesters"]["completed_credits"].sum()
-        return (
-            f"**Academic Progress Summary:**\n"
-            f"• Current Active Semester: **Semester {curr_num}**\n"
-            f"• Completed Semesters: {len(completed_sem)} of 8\n"
-            f"• Verified Sample Credits Earned: **{tot_credits}**\n"
-            f"*(Note: All data shown originates from local Degree OS sample datasets.)*"
-        )
-
-    if "data structures" in q:
-        crs = data_dict["courses"][data_dict["courses"]["course_code"] == "CS201"]
-        if not crs.empty:
-            return f"**CS201 (Data Structures & Algorithms) topics:**\n{crs.iloc[0]['syllabus_topics']}"
-
-    return "I cannot verify that from the current Degree OS data."
-
-def query_gemini_with_backoff(
-    client: object,
-    model_name: str,
-    system_instruction: str,
-    user_prompt: str,
-    max_retries: int = 2
-) -> Tuple[str, str]:
-    """Call Gemini with short retries for temporary service errors."""
-    for attempt in range(max_retries):
-        try:
-            config = types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.2,
-            )
-            response = client.models.generate_content(
-                model=model_name,
-                contents=user_prompt,
-                config=config,
-            )
-            answer = getattr(response, "text", None)
-            if answer and answer.strip():
-                return answer.strip(), "Gemini AI"
-            return "I cannot verify that from the current Degree OS data.", "Gemini AI"
-        except APIError as exc:
-            message = str(exc)
-            code = getattr(exc, "code", None)
-            transient = code in (429, 500, 502, 503, 504) or any(
-                token in message for token in ("429", "500", "502", "503", "504", "UNAVAILABLE", "RESOURCE_EXHAUSTED")
-            )
-            if transient and attempt < max_retries - 1:
-                time.sleep(1.5 * (2 ** attempt))
-                continue
-            if "404" in message or "NOT_FOUND" in message:
-                return "The configured Gemini model is unavailable. Check the model name in Ask Degree AI settings.", "Error"
-            if "API_KEY_INVALID" in message or "invalid api key" in message.lower():
-                return "The Gemini API key was rejected. Check GEMINI_API_KEY in Streamlit Secrets.", "Error"
-            if "429" in message or "RESOURCE_EXHAUSTED" in message or "quota" in message.lower():
-                return "Gemini is temporarily rate-limited or the API quota has been reached. Using local academic data instead.", "Error"
-            if "503" in message or "UNAVAILABLE" in message:
-                return "Gemini is temporarily overloaded (503). Using local academic data instead.", "Error"
-            return "Gemini request failed. Local academic data is still available.", "Error"
-        except Exception:
-            return "Could not connect to Gemini. Local academic data is still available.", "Error"
-    return "I cannot verify that from the current Degree OS data.", "Local Fallback"
-
-
-# 4. SHARED UI HELPER COMPONENTS
-# ==========================================
-
-def render_section_header(title: str, subtitle: str, badge_text: Optional[str] = None):
-    """Render consistent header across all 11 sections."""
-    col1, col2 = st.columns([5, 1])
-    with col1:
-        st.markdown(f"### {title}")
-        st.markdown(f"<p style='color: #64748b; margin-top:-0.5rem; margin-bottom:1rem;'>{subtitle}</p>", unsafe_allow_html=True)
-    with col2:
-        if badge_text:
-            st.markdown(f"<div style='text-align: right;'><span class='badge badge-progress'>{badge_text}</span></div>", unsafe_allow_html=True)
-    st.markdown("---")
-
-def get_status_badge(status: str) -> str:
-    """Format status with CSS badge."""
-    s = str(status).strip()
-    if s == "Completed":
-        return f"<span class='badge badge-completed'>{s}</span>"
-    elif s in ["In Progress", "Upcoming"]:
-        return f"<span class='badge badge-progress'>{s}</span>"
-    elif s in ["Urgent", "Overdue"]:
-        return f"<span class='badge badge-urgent'>{s}</span>"
-    return f"<span class='badge badge-pending'>{s}</span>"
-
-
-# ==========================================
-# 5. NAVIGATION SECTIONS (1 to 11)
-# ==========================================
-
-datasets = get_all_datasets()
-
-# Sidebar Navigation
-with st.sidebar:
-    st.markdown("## 🎓 Degree OS")
-    st.caption("Engineering Academic Operating System")
-    st.markdown("---")
-    
-    sections = [
-        "1. Dashboard",
-        "2. Semesters 1–8",
-        "3. Courses & Syllabus",
-        "4. University Syllabus",
-        "5. Academic / Leave Calendar",
-        "6. Internal Assessments",
-        "7. Status Tracker",
-        "8. Scorecard",
-        "9. Plan & Checklist",
-        "10. Ask Degree AI",
-        "11. Data Admin",
-    ]
-    
-    selected_section = st.radio("Navigation", sections, index=0)
-    
-    st.markdown("---")
-    st.markdown("#### ⚙️ AI Engine Status")
-    configured_key = st.secrets.get("GEMINI_API_KEY", "")
-    if GENAI_AVAILABLE and configured_key:
-        st.success("Gemini API: Ready")
-    elif not GENAI_AVAILABLE:
-        st.warning("google-genai SDK not installed")
-    else:
-        st.info("API Key not set in secrets.toml (Fallback active)")
-        
-    st.caption("Engineering Degree OS • v2.5 Demonstration")
-
-
-# ----------------------------------------------------
-# 1. DASHBOARD
-# ----------------------------------------------------
-if selected_section == "1. Dashboard":
-    active_rows = datasets["semesters"]
-    active_rows = active_rows[active_rows["status"].astype(str).str.lower().eq("in progress")]
-    active_semester_label = f"Semester {int(active_rows.iloc[0]['semester_number'])} Active" if not active_rows.empty else "No active semester"
-    render_section_header("Academic Dashboard", "Summary of degree progress, credits, and immediate priorities", active_semester_label)
-    
-    # Metric cards calculations
-    sem_df = datasets["semesters"]
-    courses_df = datasets["courses"]
-    scores_df = datasets["scores"]
-    assessments_df = datasets["assessments"]
-    cal_df = datasets["academic_calendar"]
-    checklist_df = datasets["plan_checklist"]
-    
-    total_completed_credits = pd.to_numeric(sem_df["completed_credits"], errors="coerce").fillna(0).sum()
-    total_degree_credits = pd.to_numeric(sem_df["total_credits"], errors="coerce").fillna(0).sum()
-    progress_pct = int((total_completed_credits / total_degree_credits) * 100) if total_degree_credits else 0
-    active_semester_value = int(active_rows.iloc[0]["semester_number"]) if not active_rows.empty else None
-    
-    # Calculate prototype aggregate percentage
-    if not scores_df.empty and "marks_obtained" in scores_df.columns and "max_marks" in scores_df.columns:
-        valid_scores = scores_df[scores_df["max_marks"] > 0]
-        obtained = valid_scores["marks_obtained"].sum()
-        maximum = valid_scores["max_marks"].sum()
-        proto_score_pct = f"{((obtained / maximum) * 100):.1f}%" if maximum > 0 else "N/A"
-    else:
-        proto_score_pct = "N/A"
-
-    # Identify Next Assessment
-    today = pd.Timestamp.today().normalize()
-    assessment_dates = pd.to_datetime(assessments_df["date"], errors="coerce")
-    upcoming_asn = assessments_df[
-        assessments_df["status"].astype(str).str.lower().eq("upcoming") & assessment_dates.ge(today)
-    ].copy()
-    if not upcoming_asn.empty:
-        upcoming_asn["_date_sort"] = pd.to_datetime(upcoming_asn["date"], errors="coerce")
-        upcoming_asn = upcoming_asn.sort_values("_date_sort")
-    next_asn_str = f"{upcoming_asn.iloc[0]['course_code']} ({upcoming_asn.iloc[0]['date']})" if not upcoming_asn.empty else "No future assessment recorded"
-
-    cal_dates = pd.to_datetime(cal_df["date"], errors="coerce")
-    future_events = cal_df[cal_dates.ge(today)].copy()
-    if not future_events.empty:
-        future_events["_date_sort"] = pd.to_datetime(future_events["date"], errors="coerce")
-        future_events = future_events.sort_values("_date_sort")
-    next_event_str = f"{future_events.iloc[0]['event_name']} ({future_events.iloc[0]['date']})" if not future_events.empty else "No future event recorded"
-
-    # Render Top 4 KPI Metrics
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.markdown(
-            f"""<div class='metric-card'>
-                <div class='metric-label'>Current Degree Progress</div>
-                <div class='metric-value'>{progress_pct}%</div>
-                <div class='metric-sub'>{total_completed_credits:g} of {total_degree_credits:g} sample credits</div>
-            </div>""",
-            unsafe_allow_html=True
-        )
-    with col2:
-        st.markdown(
-            f"""<div class='metric-card'>
-                <div class='metric-label'>Active Semester</div>
-                <div class='metric-value'>{f'Semester {active_semester_value}' if active_semester_value else '—'}</div>
-                <div class='metric-sub'>Computer Science & Eng.</div>
-            </div>""",
-            unsafe_allow_html=True
-        )
-    with col3:
-        st.markdown(
-            f"""<div class='metric-card'>
-                <div class='metric-label'>Sample Score Avg.</div>
-                <div class='metric-value'>{proto_score_pct}</div>
-                <div class='metric-sub'>*Prototype test average (Not CGPA)</div>
-            </div>""",
-            unsafe_allow_html=True
-        )
-    with col4:
-        st.markdown(
-            f"""<div class='metric-card'>
-                <div class='metric-label'>Next Milestone</div>
-                <div class='metric-value' style='font-size: 1.25rem;'>{upcoming_asn.iloc[0]['course_code'] if not upcoming_asn.empty else 'None'}</div>
-                <div class='metric-sub'>{next_asn_str}</div>
-            </div>""",
-            unsafe_allow_html=True
-        )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    # Progress visual and upcoming tasks
-    c_left, c_right = st.columns([3, 2])
-    
-    with c_left:
-        st.markdown("#### 📊 Semester-by-Semester Credit Distribution")
-        chart_data = sem_df.set_index("semester_name")[["completed_credits", "total_credits"]]
-        st.bar_chart(chart_data, color=["#0284c7", "#cbd5e1"])
-        
-        st.markdown("#### 📅 Next Academic Events & Assessments")
-        st.dataframe(
-            future_events.head(4)[["date", "event_type", "event_name", "description"]],
-            use_container_width=True,
-            hide_index=True
-        )
-
-    with c_right:
-        st.markdown("#### ⚡ Priority Checklist Tasks")
-        pending_tasks = checklist_df[checklist_df["status"] != "Completed"].head(5)
-        if not pending_tasks.empty:
-            for _, task in pending_tasks.iterrows():
-                st.markdown(
-                    f"""<div class='os-card' style='padding: 0.8rem; margin-bottom: 0.5rem;'>
-                        <div style='display:flex; justify-content:space-between; align-items:center;'>
-                            <strong>{task['task_name']}</strong>
-                            {get_status_badge(task['status'])}
-                        </div>
-                        <div style='font-size:0.8rem; color:#64748b; margin-top:4px;'>
-                            Category: {task['category']} | Target: {task['target_date']}
-                        </div>
-                    </div>""",
-                    unsafe_allow_html=True
-                )
+def load_data():
+    data = {}
+    for key, filename in FILES.items():
+        path = DATA_DIR / filename
+        if path.exists():
+            try:
+                df = read_csv_cached(str(path), path.stat().st_mtime)
+            except Exception as exc:
+                st.warning(f"Could not read {filename}: {exc}. Showing an empty dataset for this section.")
+                df = DEFAULTS[key].copy()
         else:
-            st.info("All priority checklist tasks are completed.")
+            df = DEFAULTS[key].copy()
+        data[key] = normalize(df, key)
+    return data
 
+def save_data(key: str, df: pd.DataFrame):
+    DATA_DIR.mkdir(exist_ok=True)
+    df.to_csv(DATA_DIR / FILES[key], index=False)
+    st.cache_data.clear()
 
-# ----------------------------------------------------
-# 2. SEMESTERS 1–8
-# ----------------------------------------------------
-elif selected_section == "2. Semesters 1–8":
-    render_section_header("Semesters 1–8", "Comprehensive 8-semester curriculum breakdown, status, and credit completion")
-    
-    sem_df = datasets["semesters"]
-    courses_df = datasets["courses"]
-    
-    cols = st.columns(4)
-    for idx, row in sem_df.iterrows():
-        col = cols[idx % 4]
-        with col:
-            s_num = int(row["semester_number"])
-            s_courses = courses_df[courses_df["semester"] == s_num]
-            comp_credits = int(row["completed_credits"])
-            tot_credits = int(row["total_credits"])
-            pct = int((comp_credits / tot_credits) * 100) if tot_credits else 0
-            
-            st.markdown(
-                f"""<div class='os-card'>
-                    <div style='display: flex; justify-content: space-between; align-items: center;'>
-                        <div class='os-card-header'>{row['semester_name']}</div>
-                        {get_status_badge(row['status'])}
-                    </div>
-                    <div style='font-size: 0.85rem; color: #475569; margin-bottom: 0.5rem;'>
-                        Courses Enrolled: <strong>{len(s_courses)}</strong>
-                    </div>
-                    <div style='font-size: 0.85rem; color: #475569;'>
-                        Credits: <strong>{comp_credits} / {tot_credits}</strong> ({pct}%)
-                    </div>
-                </div>""",
-                unsafe_allow_html=True
-            )
-            st.progress(pct / 100)
-            st.markdown("<div style='margin-bottom: 1.2rem;'></div>", unsafe_allow_html=True)
+data = load_data()
 
+def as_num(value, default=0):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
-# ----------------------------------------------------
-# 3. COURSES & SYLLABUS
-# ----------------------------------------------------
-elif selected_section == "3. Courses & Syllabus":
-    render_section_header("Courses & Syllabus", "Detailed modular topic breakdown for each curriculum course")
-    
-    courses_df = datasets["courses"]
-    
-    filter_col1, filter_col2 = st.columns([1, 2])
-    with filter_col1:
-        sem_list = sorted(courses_df["semester"].unique().tolist())
-        chosen_sem = st.selectbox("Select Semester", ["All"] + sem_list, index=0)
-    with filter_col2:
-        search_query = st.text_input("Search Course Code, Title, or Topic keyword", "")
+def safe_date(value):
+    try:
+        return pd.to_datetime(value, errors="coerce")
+    except Exception:
+        return pd.NaT
 
-    filtered_courses = courses_df.copy()
-    if chosen_sem != "All":
-        filtered_courses = filtered_courses[filtered_courses["semester"] == chosen_sem]
-    if search_query.strip():
-        q = search_query.lower()
-        filtered_courses = filtered_courses[
-            filtered_courses["course_code"].str.lower().str.contains(q) |
-            filtered_courses["course_name"].str.lower().str.contains(q) |
-            filtered_courses["syllabus_topics"].str.lower().str.contains(q)
-        ]
+def fmt_date(value):
+    d = safe_date(value)
+    return d.strftime("%d %b %Y") if pd.notna(d) else "Not set"
 
-    st.markdown(f"**Showing {len(filtered_courses)} course(s)**")
+# ---------- Styling ----------
+st.markdown("""
+<style>
+:root { color-scheme: light; }
+.block-container {padding-top: 1.5rem; padding-bottom: 3rem; max-width: 1440px;}
+.hero {padding: 1.5rem 1.7rem; border-radius: 18px; background: linear-gradient(120deg,#14213d,#254f77); color:white; margin-bottom:1rem;}
+.hero h1 {font-size:2rem; margin:0 0 .35rem 0;}
+.hero p {color:#e5edf7; margin:0;}
+div[data-testid="stMetric"] {background:#f6f8fc; border:1px solid #e7ebf2; padding:14px; border-radius:14px;}
+div[data-testid="stMetric"] label {color:#536174;}
+section[data-testid="stSidebar"] {border-right:1px solid #e8edf4;}
+.small-muted {color:#667085; font-size:.88rem;}
+</style>
+""", unsafe_allow_html=True)
 
-    for _, c in filtered_courses.iterrows():
-        with st.expander(f"{c['course_code']} - {c['course_name']} (Semester {c['semester']} | {c['credits']} Credits)"):
-            c1, c2 = st.columns([3, 1])
-            with c1:
-                st.markdown("**Syllabus & Core Modules:**")
-                topics = [t.strip() for t in str(c['syllabus_topics']).split(",") if t.strip()]
-                for t in topics:
-                    st.markdown(f"• {t}")
-            with c2:
-                st.markdown(f"**Status:** {get_status_badge(c['status'])}", unsafe_allow_html=True)
-                st.markdown(f"**Course Code:** `{c['course_code']}`")
-                st.markdown(f"**Credits Assigned:** {c['credits']}")
+st.sidebar.markdown("## 🎓 Engineering Degree OS")
+st.sidebar.caption("Your academic command centre")
+pages = [
+    "Dashboard", "Semesters 1–8", "Courses & Syllabus", "University Syllabus",
+    "Academic / Leave Calendar", "Internal Assessments", "Status Tracker",
+    "Scorecard", "Plan & Checklist", "Ask Degree AI", "Data Admin"
+]
+page = st.sidebar.radio("Navigate", pages, label_visibility="collapsed")
+st.sidebar.divider()
+st.sidebar.caption("Prototype • Verify official rules and dates with your university")
 
+def header(title, subtitle=""):
+    st.title(title)
+    if subtitle:
+        st.caption(subtitle)
 
-# ----------------------------------------------------
-# 4. UNIVERSITY SYLLABUS
-# ----------------------------------------------------
-elif selected_section == "4. University Syllabus":
-    render_section_header("University Syllabus & Governance", "Statutory syllabus framework, regulations, and source references")
-    
-    st.info("ℹ️ **Verification Standard:** Information marked 'Verified Academic Framework' follows standard institutional regulation norms. All student tracking data represents a prototype simulation.")
-    
-    syl_df = datasets["university_syllabus"]
-    st.dataframe(syl_df, use_container_width=True, hide_index=True)
-    
-    st.markdown("#### Regulation Highlights")
-    st.markdown(
-        """
-        - **Curriculum Model:** Autonomous Outcome-Based Education (OBE) system.
-        - **Minimum Degree Credits:** 160 credits required across 8 semesters.
-        - **Grading Disclaimer:** Grade Point Averages (SGPA/CGPA) are governed solely by official University Controller of Examinations grade cards. Prototype percentage aggregates inside Degree OS are diagnostic tools only.
-        """
-    )
-
-
-# ----------------------------------------------------
-# 5. ACADEMIC / LEAVE CALENDAR
-# ----------------------------------------------------
-elif selected_section == "5. Academic / Leave Calendar":
-    render_section_header("Academic & Leave Calendar", "Institutional schedules, internal assessments, milestones, and holidays")
-    
-    cal_df = datasets["academic_calendar"].copy()
-    
-    col_filter, col_metrics = st.columns([1, 2])
-    with col_filter:
-        event_types = ["All"] + sorted(cal_df["event_type"].unique().tolist())
-        selected_type = st.selectbox("Filter Event Type", event_types)
-    
-    if selected_type != "All":
-        cal_df = cal_df[cal_df["event_type"] == selected_type]
-        
-    st.dataframe(cal_df, use_container_width=True, hide_index=True)
-
-
-# ----------------------------------------------------
-# 6. INTERNAL ASSESSMENTS
-# ----------------------------------------------------
-elif selected_section == "6. Internal Assessments":
-    render_section_header("Internal Assessments", "Continuous internal evaluations, target dates, and preparation checklists")
-    
-    asn_df = datasets["assessments"].copy()
-    
-    col1, col2 = st.columns(2)
-    upcoming_count = len(asn_df[asn_df["status"] == "Upcoming"])
-    completed_count = len(asn_df[asn_df["status"] == "Completed"])
-    with col1:
-        st.markdown(
-            f"""<div class='metric-card'>
-                <div class='metric-label'>Upcoming Assessments</div>
-                <div class='metric-value'>{upcoming_count}</div>
-            </div>""", unsafe_allow_html=True
-        )
-    with col2:
-        st.markdown(
-            f"""<div class='metric-card'>
-                <div class='metric-label'>Completed Assessments</div>
-                <div class='metric-value'>{completed_count}</div>
-            </div>""", unsafe_allow_html=True
-        )
-        
-    st.markdown("#### Scheduled Assessment Timeline")
-    st.dataframe(asn_df, use_container_width=True, hide_index=True)
-
-
-# ----------------------------------------------------
-# 7. STATUS TRACKER
-# ----------------------------------------------------
-elif selected_section == "7. Status Tracker":
-    render_section_header("Status Tracker", "Detailed catalog of completed, in-progress, and pending courses")
-    
-    crs_df = datasets["courses"]
-    
-    t_comp, t_prog, t_pend = st.tabs(["Completed Courses", "In Progress Courses", "Not Started"])
-    
-    with t_comp:
-        comp_df = crs_df[crs_df["status"] == "Completed"]
-        st.dataframe(comp_df[["course_code", "course_name", "semester", "credits"]], use_container_width=True, hide_index=True)
-    with t_prog:
-        prog_df = crs_df[crs_df["status"] == "In Progress"]
-        st.dataframe(prog_df[["course_code", "course_name", "semester", "credits", "syllabus_topics"]], use_container_width=True, hide_index=True)
-    with t_pend:
-        pend_df = crs_df[crs_df["status"] == "Not Started"]
-        st.dataframe(pend_df[["course_code", "course_name", "semester", "credits"]], use_container_width=True, hide_index=True)
-
-
-# ----------------------------------------------------
-# 8. SCORECARD
-# ----------------------------------------------------
-elif selected_section == "8. Scorecard":
-    render_section_header("Scorecard", "Sample performance marks records and diagnostic distributions")
-    
-    st.warning("⚠️ **Important Evaluation Policy:** The percentage shown below is an internal prototype assessment score for demonstration and planning purposes. It does not constitute an official university SGPA/CGPA transcript.")
-    
-    scores_df = datasets["scores"].copy()
-    if not scores_df.empty:
-        scores_df["percentage"] = ((scores_df["marks_obtained"] / scores_df["max_marks"]) * 100).round(1)
-        
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            st.dataframe(scores_df, use_container_width=True, hide_index=True)
-        with c2:
-            st.markdown("#### Score Proportions")
-            st.bar_chart(scores_df.set_index("course_code")["percentage"], color="#0284c7")
+def table_or_empty(df, message="No records added yet."):
+    if df is None or df.empty:
+        st.info(message)
     else:
-        st.info("No recorded score records available.")
+        st.dataframe(df, use_container_width=True, hide_index=True)
 
+def semester_number():
+    sems = data["semesters"].copy()
+    active = sems[sems["status"].astype(str).str.lower().isin(["in progress", "ongoing", "active", "current"])]
+    if not active.empty:
+        return int(as_num(active.iloc[0]["semester"], 1))
+    completed = sems[sems["status"].astype(str).str.lower().eq("completed")]
+    if not completed.empty:
+        return min(8, int(as_num(completed["semester"].max(), 1)) + 1)
+    return 1
 
-# ----------------------------------------------------
-# 9. PLAN & CHECKLIST
-# ----------------------------------------------------
-elif selected_section == "9. Plan & Checklist":
-    render_section_header("Plan & Checklist", "Interactive task management, study milestones, and deliverable targets")
-    
-    chk_df = datasets["plan_checklist"]
-    
-    st.markdown("Edit your tasks directly in the interactive table below. Click **Save Checklist Changes** to persist your edits to CSV.")
-    
-    edited_df = st.data_editor(
-        chk_df,
-        num_rows="dynamic",
-        use_container_width=True,
-        key="checklist_editor"
-    )
-    
-    if st.button("💾 Save Checklist Changes", type="primary"):
-        if save_data("plan_checklist.csv", edited_df):
-            st.success("Checklist saved successfully!")
-            datasets["plan_checklist"] = edited_df
+# ---------- Pages ----------
+if page == "Dashboard":
+    st.markdown('<div class="hero"><h1>Engineering Degree OS</h1><p>One organized space for your semesters, courses, assessments, progress and study plan.</p></div>', unsafe_allow_html=True)
+    sems, courses, assessments, scores, cal = (data[k] for k in ["semesters","courses","assessments","scores","calendar"])
+    current_sem = semester_number()
+    total_courses = len(courses)
+    completed_courses = int(courses["status"].astype(str).str.lower().eq("completed").sum()) if total_courses else 0
+    completed_credits = sum(as_num(x) for x in sems["completed_credits"])
+    total_credits = sum(as_num(x) for x in sems["total_credits"])
+    c1,c2,c3,c4 = st.columns(4)
+    c1.metric("Current semester", f"Semester {current_sem}")
+    c2.metric("Courses recorded", total_courses)
+    c3.metric("Completed courses", completed_courses)
+    c4.metric("Credits recorded", f"{completed_credits:g} / {total_credits:g}")
+    st.subheader("Upcoming academic activity")
+    today = pd.Timestamp(date.today())
+    if not assessments.empty:
+        a = assessments.copy()
+        a["_date"] = a["date"].apply(safe_date)
+        a = a[a["_date"].notna() & (a["_date"] >= today)].sort_values("_date")
+        table_or_empty(a[["date","semester","course_code","assessment_type","max_marks","status"]].head(5), "No future assessments are recorded.")
+    else:
+        st.info("Add assessment dates in Internal Assessments or Data Admin.")
+    st.subheader("Upcoming calendar events")
+    if not cal.empty:
+        c = cal.copy()
+        c["_date"] = c["date"].apply(safe_date)
+        c = c[c["_date"].notna() & (c["_date"] >= today)].sort_values("_date")
+        table_or_empty(c[["date","event_type","title","semester"]].head(5), "No future calendar events are recorded.")
+    else:
+        st.info("Add official academic dates when available.")
+    st.subheader("Quick access")
+    x,y,z = st.columns(3)
+    x.info("📚 **Courses**\n\nBrowse subjects and syllabus topics.")
+    y.info("📝 **Assessments**\n\nTrack internal tests and marks.")
+    z.info("🤖 **Degree AI**\n\nAsk questions using your loaded data.")
 
+elif page == "Semesters 1–8":
+    header("Semesters 1–8", "Track progress semester by semester. Credit totals are only what you enter.")
+    sems = data["semesters"].copy().sort_values("semester", key=lambda s: pd.to_numeric(s, errors="coerce"))
+    table_or_empty(sems)
+    st.subheader("Update semester progress")
+    with st.form("semester_form"):
+        n = st.number_input("Semester number", 1, 8, semester_number())
+        status = st.selectbox("Status", ["Not Started","In Progress","Completed","On Hold"])
+        total = st.number_input("Total credits (from your verified curriculum)", min_value=0.0, step=1.0)
+        done = st.number_input("Completed credits", min_value=0.0, step=1.0)
+        submitted = st.form_submit_button("Save semester")
+    if submitted:
+        sems = sems[sems["semester"].astype(str) != str(int(n))]
+        sems = pd.concat([sems, pd.DataFrame([{"semester":int(n),"status":status,"total_credits":total,"completed_credits":done}])], ignore_index=True)
+        save_data("semesters", sems)
+        st.success("Semester saved. Refreshing data…")
+        st.rerun()
 
-# ----------------------------------------------------
-# 10. ASK DEGREE AI
-# ----------------------------------------------------
-elif selected_section == "10. Ask Degree AI":
-    render_section_header("Ask Degree AI", "Grounded academic assistant powered by your Degree OS data and Gemini")
-    
-    # Model configuration selector (per requirement 2)
-    with st.expander("🛠️ Assistant Engine Configuration", expanded=False):
-        c_mod, c_info = st.columns([2, 3])
-        with c_mod:
-            # Model name recommended by the API error received during testing
-            chosen_model = st.selectbox("Configured Gemini Model", ["gemini-3.8-flash"], index=0)
-        with c_info:
-            api_key_configured = bool(st.secrets.get("GEMINI_API_KEY", "").strip())
-            if api_key_configured and GENAI_AVAILABLE:
-                st.success("Google GenAI client active with authenticated secret key.")
-            elif not GENAI_AVAILABLE:
-                st.error("google-genai library is missing. Run: pip install google-genai")
+elif page == "Courses & Syllabus":
+    header("Courses & Syllabus", "Browse your course list and the topics entered for each course.")
+    courses = data["courses"].copy()
+    if not courses.empty:
+        sem_filter = st.selectbox("Filter by semester", ["All"] + sorted(courses["semester"].astype(str).unique().tolist()))
+        if sem_filter != "All":
+            courses = courses[courses["semester"].astype(str) == sem_filter]
+        search = st.text_input("Search course name, code or topic")
+        if search:
+            mask = courses.astype(str).apply(lambda col: col.str.contains(search, case=False, na=False)).any(axis=1)
+            courses = courses[mask]
+    table_or_empty(courses[["semester","course_code","course_name","credits","status","syllabus"]] if not courses.empty else courses)
+
+elif page == "University Syllabus":
+    header("University Syllabus", "Store official curriculum details with a source reference. Unverified entries are not treated as official.")
+    table_or_empty(data["university"])
+    st.warning("This prototype does not assume a university, regulation year, official credit requirement or exam rule. Verify each entry against your university's official document.")
+
+elif page == "Academic / Leave Calendar":
+    header("Academic / Leave Calendar", "Use official college or university dates. Sample entries must be verified.")
+    cal = data["calendar"].copy()
+    if not cal.empty:
+        cal["_sort"] = cal["date"].apply(safe_date)
+        cal = cal.sort_values("_sort", na_position="last").drop(columns="_sort")
+    table_or_empty(cal)
+
+elif page == "Internal Assessments":
+    header("Internal Assessments", "Track assessment dates, maximum marks and status.")
+    table_or_empty(data["assessments"])
+    st.subheader("Add assessment")
+    with st.form("assessment_form"):
+        sem = st.number_input("Semester", 1, 8, semester_number())
+        code = st.text_input("Course code")
+        typ = st.text_input("Assessment type", "IA1")
+        dt = st.date_input("Assessment date")
+        maximum = st.number_input("Maximum marks", min_value=0.0, step=1.0)
+        status = st.selectbox("Status", ["Planned","Completed","Postponed"])
+        add = st.form_submit_button("Add assessment")
+    if add:
+        new = {"semester":int(sem),"course_code":code.strip(),"assessment_type":typ.strip(),"date":dt.isoformat(),"max_marks":maximum,"status":status}
+        save_data("assessments", pd.concat([data["assessments"],pd.DataFrame([new])],ignore_index=True))
+        st.success("Assessment added.")
+        st.rerun()
+
+elif page == "Status Tracker":
+    header("Status Tracker", "A combined view of course completion and semester progress.")
+    st.subheader("Course status")
+    table_or_empty(data["courses"][["semester","course_code","course_name","status"]] if not data["courses"].empty else data["courses"])
+    st.subheader("Semester status")
+    table_or_empty(data["semesters"])
+
+elif page == "Scorecard":
+    header("Scorecard", "Recorded marks and a simple percentage summary.")
+    scores = data["scores"].copy()
+    table_or_empty(scores)
+    if not scores.empty:
+        scores["_score"] = pd.to_numeric(scores["score"], errors="coerce")
+        scores["_max"] = pd.to_numeric(scores["max_marks"], errors="coerce")
+        valid = scores.dropna(subset=["_score","_max"])
+        earned, maximum = valid["_score"].sum(), valid["_max"].sum()
+        if maximum > 0:
+            st.metric("Prototype score percentage", f"{earned/maximum*100:.2f}%")
+            st.caption("This is a basic percentage calculated from entered marks. It is NOT an official CGPA/SGPA conversion.")
+    else:
+        st.info("Add your assessment marks to see a percentage summary.")
+
+elif page == "Plan & Checklist":
+    header("Plan & Checklist", "Keep track of study tasks, preparation and deadlines.")
+    tasks = data["checklist"].copy()
+    table_or_empty(tasks)
+    st.subheader("Add a task")
+    with st.form("task_form"):
+        category = st.text_input("Category", "Study")
+        item = st.text_input("Task")
+        due = st.date_input("Target date")
+        status = st.selectbox("Task status", ["Not Started","In Progress","Done"])
+        notes = st.text_input("Notes")
+        add_task = st.form_submit_button("Add task")
+    if add_task:
+        row = {"category":category,"item":item,"target_date":due.isoformat(),"status":status,"notes":notes}
+        save_data("checklist",pd.concat([tasks,pd.DataFrame([row])],ignore_index=True))
+        st.success("Task added.")
+        st.rerun()
+
+elif page == "Ask Degree AI":
+    header("Ask Degree AI", "Answers are grounded in your CSV data. Missing information is not guessed.")
+    st.caption("If Gemini is not configured or temporarily unavailable, the app uses a small local data lookup.")
+    question = st.text_area("Ask about your semesters, courses, syllabus, assessments or marks", placeholder="Which courses are incomplete in Semester 3?")
+    use_gemini = st.checkbox("Use Gemini when an API key is configured", value=True)
+    if st.button("Get answer", type="primary") and question.strip():
+        # Build a compact context from loaded CSVs only.
+        context_parts = []
+        for key, df in data.items():
+            context_parts.append(f"{key.upper()} DATA:\n{df.head(100).to_csv(index=False)}")
+        context = "\n\n".join(context_parts)
+        answer = None
+        api_key = None
+        try:
+            api_key = st.secrets.get("GEMINI_API_KEY", None)
+        except Exception:
+            api_key = os.getenv("GEMINI_API_KEY")
+        if use_gemini and api_key:
+            try:
+                from google import genai
+                from google.genai import types
+                client = genai.Client(api_key=api_key)
+                prompt = (
+                    "You are Engineering Degree OS assistant. Answer ONLY from the supplied CSV data. "
+                    "Do not invent official university rules, CGPA formulas, dates, credits, syllabus or eligibility. "
+                    "If the answer is not present, reply exactly: I cannot verify that from the current Degree OS data.\n\n"
+                    f"DATA:\n{context}\n\nQUESTION: {question}"
+                )
+                response = client.models.generate_content(
+                    model="gemini-3.8-flash",
+                    contents=prompt,
+                    config=types.GenerateContentConfig(temperature=0.2)
+                )
+                answer = response.text
+            except Exception as exc:
+                st.warning(f"Gemini is unavailable right now. Using local data lookup instead. ({type(exc).__name__})")
+        if not answer:
+            q = question.lower()
+            courses = data["courses"]
+            if any(k in q for k in ["incomplete","pending","not completed"]):
+                result = courses[~courses["status"].astype(str).str.lower().eq("completed")]
+                answer = result[["semester","course_code","course_name","status"]].to_string(index=False) if not result.empty else "No incomplete courses are recorded."
+            elif "course" in q or "subject" in q:
+                result = courses
+                for token in re.findall(r"\b[1-8]\b", q):
+                    result = result[result["semester"].astype(str) == token]
+                answer = result[["semester","course_code","course_name","status","syllabus"]].to_string(index=False) if not result.empty else "I cannot verify that from the current Degree OS data."
+            elif "assessment" in q or "exam" in q or "test" in q:
+                result = data["assessments"]
+                if not result.empty:
+                    answer = result.to_string(index=False)
+                else:
+                    answer = "I cannot verify that from the current Degree OS data."
+            elif "cgpa" in q or "sgpa" in q or "percentage" in q:
+                answer = "I cannot verify an official CGPA/SGPA from the current Degree OS data. The Scorecard can show a basic percentage from entered marks only."
+            elif "semester" in q or "progress" in q:
+                answer = data["semesters"].to_string(index=False) if not data["semesters"].empty else "I cannot verify that from the current Degree OS data."
             else:
-                st.warning("GEMINI_API_KEY secret not found. Local grounded fallback is serving answers.")
+                answer = "I cannot verify that from the current Degree OS data."
+        st.markdown("### Answer")
+        st.write(answer)
 
-    # Initialize session state chat history
-    if "degree_ai_messages" not in st.session_state:
-        st.session_state["degree_ai_messages"] = [
-            {
-                "role": "assistant",
-                "content": "Hello! I am Degree AI, your academic assistant for Engineering Degree OS. Ask me about your courses, syllabus modules, next assessments, pending checklist tasks, or semester progress.",
-                "source": "Degree OS System"
-            }
-        ]
+elif page == "Data Admin":
+    header("Data Admin", "Review and edit the CSV records used by the application.")
+    st.warning("Keep a backup before editing. Do not enter private API keys into CSV files.")
+    labels = {
+        "semesters":"Semesters","courses":"Courses","calendar":"Academic calendar",
+        "assessments":"Assessments","scores":"Scores","checklist":"Plan checklist","university":"University syllabus"
+    }
+    chosen = st.selectbox("Choose dataset", list(labels), format_func=lambda x: labels[x])
+    edited = st.data_editor(data[chosen], num_rows="dynamic", use_container_width=True, key=f"editor_{chosen}")
+    if st.button("Save dataset", type="primary"):
+        save_data(chosen, edited)
+        st.success(f"{FILES[chosen]} saved.")
+        st.rerun()
 
-    # Sample query prompts for convenience
-    st.markdown("**Suggested questions:**")
-    prompt_cols = st.columns(3)
-    sample_q1 = "Which courses are incomplete in Semester 4?"
-    sample_q2 = "What is my next assessment and what should I prepare?"
-    sample_q3 = "What topics are included in Data Structures?"
-    
-    suggested_clicked = None
-    if prompt_cols[0].button(f"📌 {sample_q1}", use_container_width=True):
-        suggested_clicked = sample_q1
-    if prompt_cols[1].button(f"📌 {sample_q2}", use_container_width=True):
-        suggested_clicked = sample_q2
-    if prompt_cols[2].button(f"📌 {sample_q3}", use_container_width=True):
-        suggested_clicked = sample_q3
-
-    # Display chat conversation history
-    for msg in st.session_state["degree_ai_messages"]:
-        with st.chat_message(msg["role"]):
-            if msg.get("source") and msg["role"] == "assistant":
-                badge_class = "source-gemini" if "Gemini" in msg["source"] else "source-local"
-                st.markdown(f"<span class='source-tag {badge_class}'>Source: {msg['source']}</span>", unsafe_allow_html=True)
-            st.markdown(msg["content"])
-
-    # Chat Input handler
-    user_input = st.chat_input("Ask a question about your academic degree data...")
-    if suggested_clicked:
-        user_input = suggested_clicked
-
-    if user_input:
-        # Display user message
-        st.session_state["degree_ai_messages"].append({"role": "user", "content": user_input})
-        with st.chat_message("user"):
-            st.markdown(user_input)
-
-        # Build grounded system instruction
-        system_context = build_grounded_academic_context(datasets)
-        system_instruction = f"""
-You are the embedded AI academic advisor inside the application 'Engineering Degree OS'.
-
-SAFETY & GROUNDING CONSTRAINTS:
-1. You must answer questions ONLY using the verified context from the application's loaded CSV data provided below.
-2. If the user asks about something not present in the data, or requires unverified personal academic records, answer EXACTLY:
-   "I cannot verify that from the current Degree OS data."
-3. Do not invent university rules, regulations, exam dates, credits, CGPA formulas, or eligibility criteria.
-4. Clearly identify sample data as sample data when discussing marks or assessments.
-5. Do not present prototype percentages as official SGPA or CGPA.
-6. Maintain an encouraging, concise, and structured tone suitable for an engineering student.
-
-CURRENT DEGREE OS ACADEMIC CONTEXT:
-{system_context}
-"""
-
-        # Response Generation with fallback
-        with st.chat_message("assistant"):
-            gemini_client = get_gemini_client()
-            
-            if gemini_client:
-                with st.spinner("Analyzing Degree OS records via Gemini..."):
-                    answer_text, source_tag = query_gemini_with_backoff(
-                        client=gemini_client,
-                        model_name=chosen_model,
-                        system_instruction=system_instruction,
-                        user_prompt=user_input
-                    )
-                    # If error occurred with Gemini, fall back smoothly to local parser
-                    if source_tag == "Error":
-                        st.caption("Gemini unavailable, executing grounded local analysis...")
-                        answer_text = generate_local_rule_based_response(user_input, datasets)
-                        source_tag = "Local CSV Grounded Fallback"
-            else:
-                with st.spinner("Analyzing Degree OS records locally..."):
-                    answer_text = generate_local_rule_based_response(user_input, datasets)
-                    source_tag = "Local CSV Grounded Fallback"
-
-            badge_class = "source-gemini" if "Gemini" in source_tag else "source-local"
-            st.markdown(f"<span class='source-tag {badge_class}'>Source: {source_tag}</span>", unsafe_allow_html=True)
-            st.markdown(answer_text)
-
-            # Store in session state
-            st.session_state["degree_ai_messages"].append({
-                "role": "assistant",
-                "content": answer_text,
-                "source": source_tag
-            })
-
-
-# ----------------------------------------------------
-# 11. DATA ADMIN
-# ----------------------------------------------------
-elif selected_section == "11. Data Admin":
-    render_section_header("Data Admin", "Direct management and editing of all foundational CSV datasets")
-    
-    st.markdown("Select any table to view or edit raw records. Modifications persist immediately to the application CSV storage.")
-    
-    table_choice = st.selectbox(
-        "Select Table to Administer",
-        [
-            "semesters.csv",
-            "courses.csv",
-            "academic_calendar.csv",
-            "assessments.csv",
-            "scores.csv",
-            "plan_checklist.csv",
-            "university_syllabus.csv",
-        ]
-    )
-    
-    curr_df = load_data(table_choice)
-    
-    edited_data = st.data_editor(
-        curr_df,
-        num_rows="dynamic",
-        use_container_width=True,
-        key=f"admin_editor_{table_choice}"
-    )
-    
-    col_save, col_reload = st.columns([1, 4])
-    with col_save:
-        if st.button(f"💾 Save {table_choice}", type="primary"):
-            if save_data(table_choice, edited_data):
-                st.success(f"{table_choice} saved successfully!")
-                # Refresh local in-memory dataset
-                key_name = table_choice.replace(".csv", "")
-                datasets[key_name] = edited_data
-    with col_reload:
-        if st.button("🔄 Reload from Disk"):
-            st.rerun()
+st.sidebar.divider()
+st.sidebar.caption("Engineering Degree OS • Academic data stays in your project CSV files")

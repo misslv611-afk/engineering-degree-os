@@ -1,46 +1,34 @@
-# My Engineering Degree OS
+# Engineering Degree OS
 
-A CSV-powered Streamlit command center for tracking an engineering degree from Semester 1 to Semester 8.
+A Streamlit prototype for managing engineering degree information across Semesters 1–8.
 
 ## Features
-- Dashboard with semester, credit and progress summaries
-- Eight-semester overview
-- Courses and syllabus topics filtered by semester
-- University syllabus reference page
-- Academic / leave calendar
+- Dashboard and semester progress
+- Courses and syllabus topics
+- University syllabus reference table
+- Academic calendar
 - Internal assessments
 - Course status tracker
-- Scorecard with clearly labelled prototype percentage (not official CGPA)
-- Editable Plan & Checklist with due-soon and overdue counts
-- Local, data-grounded Ask Degree AI chatbot with a safe fallback
-- Data Admin editor for all CSV tables
+- Marks scorecard with basic percentage (not official CGPA)
+- Study plan and checklist
+- Ask Degree AI (Gemini optional; local fallback included)
+- Data Admin for editing CSV data
 
 ## Run locally
-1. Install Python 3.10 or newer.
-2. Open a terminal in this folder.
-3. Install dependencies:
-   `python -m pip install -r requirements.txt`
-4. Start the app:
-   `python -m streamlit run app.py`
-
-## Project structure
-```text
-engineering-degree-os/
-├── app.py
-├── requirements.txt
-├── README.md
-└── data/
-    ├── semesters.csv
-    ├── courses.csv
-    ├── academic_calendar.csv
-    ├── assessments.csv
-    ├── scores.csv
-    ├── plan_checklist.csv
-    └── university_syllabus.csv
+```bash
+python -m pip install -r requirements.txt
+python -m streamlit run app.py
 ```
 
-## Important data note
-The included records are demonstration/sample data based on the assignment brief. Replace course names, dates, marks, credits, academic calendar entries and syllabus references with verified information from your own university. The app does not invent an official SGPA/CGPA formula.
+## Gemini API key (optional)
+Create `.streamlit/secrets.toml`:
+```toml
+GEMINI_API_KEY = "paste-your-own-key-here"
+```
+Never commit this file. It is ignored by `.gitignore`. For Streamlit Community Cloud, add `GEMINI_API_KEY` in the app's Secrets settings.
 
-## Deploy
-Push the complete folder to a GitHub repository. In Streamlit Community Cloud, create an app using the repository, branch and `app.py` as the entry point. Do not upload API keys or secrets.
+## Data files
+All editable data is in `data/`. Keep the existing CSV files when replacing app code. The app recognizes common column-name variations and supplies empty columns when a field is missing. Back up your data folder before editing.
+
+## Important
+This is an academic organizer prototype. It does not claim to know your university, regulation year, official syllabus, credit requirements, examination rules or CGPA formula. Enter and verify official information from your institution. The Scorecard percentage is only a simple percentage of the marks entered.
