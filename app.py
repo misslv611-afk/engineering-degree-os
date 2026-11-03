@@ -191,6 +191,33 @@ if page == "Dashboard":
     c2.metric("Courses recorded", total_courses)
     c3.metric("Completed courses", completed_courses)
     c4.metric("Credits recorded", f"{completed_credits:g} / {total_credits:g}")
+
+    # Colourful overall progress bar, calculated only from course statuses.
+    progress = (completed_courses / total_courses) if total_courses else 0.0
+    progress_pct = round(progress * 100)
+    st.subheader("Overall course completion")
+    st.markdown(
+        f"""
+        <div style="background:#e9eef5;border-radius:999px;height:22px;overflow:hidden;
+                    box-shadow:inset 0 1px 3px rgba(0,0,0,.08);">
+          <div role="progressbar" aria-valuenow="{progress_pct}" aria-valuemin="0"
+               aria-valuemax="100"
+               style="width:{progress_pct}%;height:100%;border-radius:999px;
+                      background:linear-gradient(90deg,#6a5af9 0%,#2589ff 35%,#12b8a6 68%,#8bd450 100%);
+                      transition:width .35s ease;">
+          </div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;
+                    margin-top:7px;color:#667085;font-size:.9rem;">
+          <span>{completed_courses} of {total_courses} courses completed</span>
+          <strong style="color:#344054;">{progress_pct}%</strong>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if total_courses == 0:
+        st.caption("Add courses and mark their status as Completed to calculate progress.")
+
     st.subheader("Upcoming academic activity")
     today = pd.Timestamp(date.today())
     if not assessments.empty:
