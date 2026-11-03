@@ -4,6 +4,11 @@ from datetime import date, timedelta
 import pandas as pd
 import streamlit as st
 
+try:
+    from google import genai
+except ImportError:
+    genai = None
+
 APP_DIR = Path(__file__).parent
 DATA_DIR = APP_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
@@ -340,14 +345,58 @@ elif page == "Ask Degree AI":
         if "status" in ql and ("semester" in ql or "sem" in ql):
             return "\n".join(f"Semester {int(r.semester)}: {r.status}" for r in sem.itertuples()), "Semesters"
         if "cgpa" in ql or "gpa formula" in ql or "regulation" in ql or "eligibility" in ql:
-            return "I cannot verify that from the current Degree OS data. Please add the official university regulation/source before relying on this information.", "Safety fallback"
-        return "I cannot verify that from the current Degree OS data. Try asking about incomplete courses, the next assessment, a holiday, course topics, semester status or checklist tasks.", "Available CSV data"
+            return "I cannot verify that from the current Degree OS data.", "Safety fallback"
+        return None, None
+
+    def answer_with_gemini(q):
+        """Use Gemini only as a fallback, grounded strictly in the loaded CSV tables."""
+        api_key = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY", ""))
+        if not api_key or genai is None:
+            return "I cannot verify that from the current Degree OS data.", "Local data / Gemini not configured"
+
+        data_context = "\n\n".join([
+            "SEMESTERS:\n" + sem.to_csv(index=False),
+            "COURSES:\n" + courses.to_csv(index=False),
+            "ASSESSMENTS:\n" + assessments.to_csv(index=False),
+            "ACADEMIC CALENDAR:\n" + calendar.to_csv(index=False),
+            "SCORES:\n" + scores.to_csv(index=False),
+            "PLAN AND CHECKLIST:\n" + plan.to_csv(index=False),
+            "UNIVERSITY SYLLABUS:\n" + tables["syllabus"].to_csv(index=False),
+        ])
+        prompt = f"""You are Ask Degree AI inside an engineering student academic dashboard.
+Answer the user's question using ONLY the Degree OS data provided below.
+Do not use outside knowledge, assumptions, or invented facts.
+If the answer is not directly supported by the data, reply with exactly:
+I cannot verify that from the current Degree OS data.
+Never invent official university regulations, dates, credit requirements, eligibility rules, SGPA or CGPA formulas.
+Be concise and clearly distinguish sample records from verified official information.
+
+DEGREE OS DATA:
+{data_context}
+
+USER QUESTION: {q}
+"""
+        try:
+            client = genai.Client(api_key=api_key)
+            result = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+            )
+            answer = (result.text or "").strip()
+            if not answer:
+                return "I cannot verify that from the current Degree OS data.", "Safety fallback"
+            return answer, "Gemini · grounded in loaded Degree OS data"
+        except Exception:
+            return "I cannot verify that from the current Degree OS data.", "Gemini unavailable; safe fallback"
+
     if question:
         st.session_state.chat_history.append({"role":"user","content":question})
         response, source = answer_question(question)
+        if response is None:
+            response, source = answer_with_gemini(question)
         st.session_state.chat_history.append({"role":"assistant","content":response,"source":source})
         st.rerun()
-    st.caption("Local grounded Q&A works without an API key. Optional Gemini integration can be added later; unsupported university rules are deliberately not guessed.")
+    st.caption("Answers use loaded Degree OS data. Gemini is optional; if it is unavailable, the app uses the safe fallback. Official university rules and GPA formulas are never guessed.")
 
 elif page == "Data Admin":
     st.title("Data Admin")
