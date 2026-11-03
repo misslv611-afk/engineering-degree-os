@@ -1,0 +1,25 @@
+semester,course_code,course_name,credits,syllabus,status
+1,MA101,Engineering Mathematics I,4,Matrices; Calculus; Differential equations,Completed
+1,PH101,Engineering Physics,4,Waves; Optics; Semiconductors,Completed
+1,CS101,Programming in C,4,Algorithms; Control statements; Arrays; Functions,Completed
+2,MA201,Engineering Mathematics II,4,Differential equations; Laplace transforms,Completed
+2,EC201,Basic Electronics,3,Diodes; Transistors; Logic gates,Completed
+2,CS201,Python Programming,4,Data types; Functions; OOP; Files,Completed
+3,CS301,Data Structures,4,Stacks; Queues; Trees; Graphs,In Progress
+3,CS302,Database Management Systems,4,ER model; SQL; Normalization; Transactions,In Progress
+3,CS303,Digital Design and Computer Organization,4,Number systems; Logic gates; Adders; CPU organization,Not Started
+4,CS401,Operating Systems,4,Processes; Synchronization; Memory management; File systems,Not Started
+4,CS402,Computer Networks,4,OSI model; TCP/IP; Routing; Transport layer,Not Started
+4,CS403,Design and Analysis of Algorithms,4,Complexity; Greedy; Dynamic programming; Graph algorithms,Not Started
+5,CS501,Software Engineering,4,Development models; Requirements; Testing; Maintenance,Not Started
+5,CS502,Web Technologies,4,HTML; CSS; JavaScript; APIs,Not Started
+5,CS503,Theory of Computation,4,Automata; Regular expressions; Grammars; Turing machines,Not Started
+6,CS601,Artificial Intelligence,4,Search; Knowledge representation; Machine learning basics,Not Started
+6,CS602,Compiler Design,4,Lexical analysis; Parsing; Semantic analysis; Code generation,Not Started
+6,CS603,Cloud Computing,3,Virtualization; Service models; Deployment models,Not Started
+7,CS701,Machine Learning,4,Regression; Classification; Clustering; Model evaluation,Not Started
+7,CS702,Major Project I,6,Problem definition; Literature review; Design; Prototype,Not Started
+7,CS703,Professional Elective,3,Topics depend on selected elective,Not Started
+8,CS801,Major Project II,10,Implementation; Testing; Documentation; Presentation,Not Started
+8,CS802,Internship,6,Industry experience; Report; Evaluation,Not Started
+8,CS803,Professional Practice,2,Ethics; Communication; Career preparation,Not Started
