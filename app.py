@@ -153,7 +153,7 @@ DEFAULT_DATA = {
     "academic_calendar.csv": pd.DataFrame([
         {"date": "2026-03-25", "event_name": "Internal Assessment Test 1", "event_type": "Exam", "description": "Units 1 & 2 for all Sem 4 subjects"},
         {"date": "2026-04-10", "event_name": "Mini-Project Mid-Review", "event_type": "Academic", "description": "Review of architecture and schema definition"},
-        {"date": "2026-04-14", "event_name": "Ambedkar Jayanti", "event_type": "Holiday", "description": "University declared holiday"},
+        {"date": "2026-04-14", "event_name": "Ambedkar Jayanti", "event_type": "Holiday", "description": "Sample holiday entry; verify with the official academic calendar"},
         {"date": "2026-05-05", "event_name": "Internal Assessment Test 2", "event_type": "Exam", "description": "Units 3 & 4 evaluation"},
         {"date": "2026-05-25", "event_name": "Semester Practical Examinations", "event_type": "Exam", "description": "Lab assessments by external examiners"},
         {"date": "2026-06-08", "event_name": "End Semester University Theory Exams", "event_type": "Exam", "description": "Semester 4 final theoretical examination"},
@@ -178,8 +178,7 @@ DEFAULT_DATA = {
         {"task_id": "TSK-04", "category": "Self-Study", "task_name": "Review Dynamic Programming Knapsack Variations", "target_date": "2026-03-24", "status": "In Progress", "notes": "0/1 Knapsack, Unbounded Knapsack, Tabulation"},
     ]),
     "university_syllabus.csv": pd.DataFrame([
-        {"regulation": "R2022 Autonomous", "branch": "Computer Science & Engineering", "source_url_or_ref": "University Academic Council Ref #AC/2022/CS-Rev3", "status_type": "Verified Academic Framework", "notes": "Standard 160-credit engineering degree template. Curriculum conforms to National Model Syllabus."},
-        {"regulation": "R2022 Autonomous", "branch": "Computer Science & Engineering", "source_url_or_ref": "Sample Institutional Template", "status_type": "Sample Data Prototype", "notes": "All internal assessment marks, target dates, and percentages are simulation data for project demonstration."}
+        {"regulation": "Not entered", "branch": "Not verified", "source_url_or_ref": "Add official university syllabus URL or document reference", "status_type": "Needs Verification", "notes": "Do not treat this placeholder as an official regulation, credit requirement, or syllabus."}
     ])
 }
 
@@ -298,7 +297,7 @@ def generate_local_rule_based_response(query: str, data_dict: Dict[str, pd.DataF
             for s in range(1, 9):
                 if str(s) in q:
                     courses = data_dict["courses"]
-                    sem_crs = courses[(courses["semester"] == s) & (courses["status"] != "Completed")]
+                    sem_crs = courses[(pd.to_numeric(courses["semester"], errors="coerce") == s) & (courses["status"].astype(str) != "Completed")]
                     if not sem_crs.empty:
                         items = [f"• **{r['course_code']}**: {r['course_name']} ({r['status']})" for _, r in sem_crs.iterrows()]
                         return f"Incomplete courses in Semester {s} based on Degree OS records:\n\n" + "\n".join(items)
@@ -346,10 +345,9 @@ def query_gemini_with_backoff(
     model_name: str,
     system_instruction: str,
     user_prompt: str,
-    max_retries: int = 3
+    max_retries: int = 2
 ) -> Tuple[str, str]:
-    """Execute Gemini request with retry on 503 errors and structured grounding."""
-    backoff = 1.5
+    """Call Gemini with short retries for temporary service errors."""
     for attempt in range(max_retries):
         try:
             config = types.GenerateContentConfig(
@@ -361,33 +359,33 @@ def query_gemini_with_backoff(
                 contents=user_prompt,
                 config=config,
             )
-            if response and response.text:
-                return response.text.strip(), "Gemini AI"
+            answer = getattr(response, "text", None)
+            if answer and answer.strip():
+                return answer.strip(), "Gemini AI"
             return "I cannot verify that from the current Degree OS data.", "Gemini AI"
-        except APIError as e:
-            err_str = str(e)
-            # Detect 503 or transient overload
-            if "503" in err_str or getattr(e, "code", None) == 503:
-                if attempt < max_retries - 1:
-                    time.sleep(backoff * (2 ** attempt))
-                    continue
-                return (
-                    f"Gemini service is currently overloaded (503). Retried {max_retries} times.",
-                    "Error"
-                )
-            # Quota or auth issue
-            if "RESOURCE_EXHAUSTED" in err_str or "quota" in err_str.lower():
-                return "Gemini API quota exceeded for your project key. Switched to safe mode.", "Error"
-            if "API_KEY_INVALID" in err_str or "invalid" in err_str.lower():
-                return "The configured GEMINI_API_KEY is invalid. Please check your secrets.", "Error"
-            return f"Gemini API request error: {err_str}", "Error"
-        except Exception as e:
-            return f"Unexpected connection error: {str(e)}", "Error"
-
+        except APIError as exc:
+            message = str(exc)
+            code = getattr(exc, "code", None)
+            transient = code in (429, 500, 502, 503, 504) or any(
+                token in message for token in ("429", "500", "502", "503", "504", "UNAVAILABLE", "RESOURCE_EXHAUSTED")
+            )
+            if transient and attempt < max_retries - 1:
+                time.sleep(1.5 * (2 ** attempt))
+                continue
+            if "404" in message or "NOT_FOUND" in message:
+                return "The configured Gemini model is unavailable. Check the model name in Ask Degree AI settings.", "Error"
+            if "API_KEY_INVALID" in message or "invalid api key" in message.lower():
+                return "The Gemini API key was rejected. Check GEMINI_API_KEY in Streamlit Secrets.", "Error"
+            if "429" in message or "RESOURCE_EXHAUSTED" in message or "quota" in message.lower():
+                return "Gemini is temporarily rate-limited or the API quota has been reached. Using local academic data instead.", "Error"
+            if "503" in message or "UNAVAILABLE" in message:
+                return "Gemini is temporarily overloaded (503). Using local academic data instead.", "Error"
+            return "Gemini request failed. Local academic data is still available.", "Error"
+        except Exception:
+            return "Could not connect to Gemini. Local academic data is still available.", "Error"
     return "I cannot verify that from the current Degree OS data.", "Local Fallback"
 
 
-# ==========================================
 # 4. SHARED UI HELPER COMPONENTS
 # ==========================================
 
@@ -459,7 +457,10 @@ with st.sidebar:
 # 1. DASHBOARD
 # ----------------------------------------------------
 if selected_section == "1. Dashboard":
-    render_section_header("Academic Dashboard", "Real-time summary of degree progress, credits, and immediate priorities", "Semester 4 Active")
+    active_rows = datasets["semesters"]
+    active_rows = active_rows[active_rows["status"].astype(str).str.lower().eq("in progress")]
+    active_semester_label = f"Semester {int(active_rows.iloc[0]['semester_number'])} Active" if not active_rows.empty else "No active semester"
+    render_section_header("Academic Dashboard", "Summary of degree progress, credits, and immediate priorities", active_semester_label)
     
     # Metric cards calculations
     sem_df = datasets["semesters"]
@@ -469,9 +470,10 @@ if selected_section == "1. Dashboard":
     cal_df = datasets["academic_calendar"]
     checklist_df = datasets["plan_checklist"]
     
-    total_completed_credits = sem_df["completed_credits"].sum()
-    total_degree_credits = sem_df["total_credits"].sum()
+    total_completed_credits = pd.to_numeric(sem_df["completed_credits"], errors="coerce").fillna(0).sum()
+    total_degree_credits = pd.to_numeric(sem_df["total_credits"], errors="coerce").fillna(0).sum()
     progress_pct = int((total_completed_credits / total_degree_credits) * 100) if total_degree_credits else 0
+    active_semester_value = int(active_rows.iloc[0]["semester_number"]) if not active_rows.empty else None
     
     # Calculate prototype aggregate percentage
     if not scores_df.empty and "marks_obtained" in scores_df.columns and "max_marks" in scores_df.columns:
@@ -483,11 +485,22 @@ if selected_section == "1. Dashboard":
         proto_score_pct = "N/A"
 
     # Identify Next Assessment
-    upcoming_asn = assessments_df[assessments_df["status"] == "Upcoming"]
-    next_asn_str = f"{upcoming_asn.iloc[0]['course_code']} ({upcoming_asn.iloc[0]['date']})" if not upcoming_asn.empty else "None scheduled"
+    today = pd.Timestamp.today().normalize()
+    assessment_dates = pd.to_datetime(assessments_df["date"], errors="coerce")
+    upcoming_asn = assessments_df[
+        assessments_df["status"].astype(str).str.lower().eq("upcoming") & assessment_dates.ge(today)
+    ].copy()
+    if not upcoming_asn.empty:
+        upcoming_asn["_date_sort"] = pd.to_datetime(upcoming_asn["date"], errors="coerce")
+        upcoming_asn = upcoming_asn.sort_values("_date_sort")
+    next_asn_str = f"{upcoming_asn.iloc[0]['course_code']} ({upcoming_asn.iloc[0]['date']})" if not upcoming_asn.empty else "No future assessment recorded"
 
-    # Identify Next Event
-    next_event_str = f"{cal_df.iloc[0]['event_name']} ({cal_df.iloc[0]['date']})" if not cal_df.empty else "No upcoming events"
+    cal_dates = pd.to_datetime(cal_df["date"], errors="coerce")
+    future_events = cal_df[cal_dates.ge(today)].copy()
+    if not future_events.empty:
+        future_events["_date_sort"] = pd.to_datetime(future_events["date"], errors="coerce")
+        future_events = future_events.sort_values("_date_sort")
+    next_event_str = f"{future_events.iloc[0]['event_name']} ({future_events.iloc[0]['date']})" if not future_events.empty else "No future event recorded"
 
     # Render Top 4 KPI Metrics
     col1, col2, col3, col4 = st.columns(4)
@@ -496,7 +509,7 @@ if selected_section == "1. Dashboard":
             f"""<div class='metric-card'>
                 <div class='metric-label'>Current Degree Progress</div>
                 <div class='metric-value'>{progress_pct}%</div>
-                <div class='metric-sub'>{total_completed_credits} of {total_degree_credits} verified credits</div>
+                <div class='metric-sub'>{total_completed_credits:g} of {total_degree_credits:g} sample credits</div>
             </div>""",
             unsafe_allow_html=True
         )
@@ -504,7 +517,7 @@ if selected_section == "1. Dashboard":
         st.markdown(
             f"""<div class='metric-card'>
                 <div class='metric-label'>Active Semester</div>
-                <div class='metric-value'>Semester 4</div>
+                <div class='metric-value'>{f'Semester {active_semester_value}' if active_semester_value else '—'}</div>
                 <div class='metric-sub'>Computer Science & Eng.</div>
             </div>""",
             unsafe_allow_html=True
@@ -540,7 +553,7 @@ if selected_section == "1. Dashboard":
         
         st.markdown("#### 📅 Next Academic Events & Assessments")
         st.dataframe(
-            cal_df.head(4)[["date", "event_type", "event_name", "description"]],
+            future_events.head(4)[["date", "event_type", "event_name", "description"]],
             use_container_width=True,
             hide_index=True
         )
@@ -792,12 +805,8 @@ elif selected_section == "10. Ask Degree AI":
     with st.expander("🛠️ Assistant Engine Configuration", expanded=False):
         c_mod, c_info = st.columns([2, 3])
         with c_mod:
-            # gemini-2.5-flash is current high-speed model
-            chosen_model = st.selectbox(
-                "Configured Gemini Model",
-                ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash"],
-                index=0
-            )
+            # Model name recommended by the API error received during testing
+            chosen_model = st.selectbox("Configured Gemini Model", ["gemini-3.8-flash"], index=0)
         with c_info:
             api_key_configured = bool(st.secrets.get("GEMINI_API_KEY", "").strip())
             if api_key_configured and GENAI_AVAILABLE:
